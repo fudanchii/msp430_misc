@@ -58,8 +58,7 @@ void __attribute__ ((interrupt(PORT1_VECTOR))) Port_1 (void)
     up ^= 1;
 
     // Enable Watchdog
-    // Select SMCLK as source clock with interval value:
-    // 32ms * 2 = ~64ms
+    // Select SMCLK as source clock
     WDTCTL = WDT_MDLY_32;
     IFG1 &= ~WDTIFG;
     IE1  |=  WDTIE;
