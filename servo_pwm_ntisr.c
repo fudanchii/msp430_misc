@@ -1,83 +1,49 @@
 
 #define MCU_CLOCK           1100000
-#define PWM_FREQUENCY       50
+#define SERVO_FREQUENCY     50
 
 #define SERVO_STEPS         180     // Maximum amount of steps in degrees (180 is common)
 #define SERVO_MIN           450     // The minimum duty cycle for this servo
 #define SERVO_MAX           2700    // The maximum duty cycle
 
-#include <msp430_commons.c>
+#include <msp430/commons.h>
+#include <msp430/g2553/pwm.h>
 
-unsigned int PWM_Period = (MCU_CLOCK / PWM_FREQUENCY);  // PWM Period
-unsigned int duty_cycle_at[SERVO_STEPS + 1];
+unsigned int PWM1_Period = (MCU_CLOCK / SERVO_FREQUENCY);   // PWM Period
+unsigned int PWM1_duty_cycle_at[SERVO_STEPS + 1];
 unsigned int current_position;
 
 void main (void) {
-    // Shut off the watchdog (for now)
-    WDTCTL = WDTPW + WDTHOLD;
-
-    init_servo_angle_lut();
-
-    Pin1_setup(P_OUT, BIT6);
-
-    // Setup the PWM, with:
-    // Up-mode & reset-set cycle (no interrupt)
-    PWM1_nointr_setup(PWM_Period, duty_cycle_at[0]);
-
-    // select pin 1.2 for peripheral,
-    // in this case for timer A as pwm output
-    Pin1_select_peripheral(BIT2);
-
-    // Setup P1.3, for triggering pwm
-    Pin1_switch_setup(BIT3);
-
+    basic_setup();
+    INIT_SERVO_ANGLE_LUT(PWM1_duty_cycle_at, SERVO);
+    PWM1_nointr_setup(PWM1_Period, PWM1_duty_cycle_at[0]);
+    Pin1_peripheral_select(BIT2);
     current_position = 0;
-
     __bis_SR_register(LPM0_bits | GIE);
 }
 
 // Port 1 interrupt service routine
-#if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
-#pragma vector=PORT1_VECTOR
-__interrupt void Port_1(void)
-#elif defined(__GNUC__)
-void __attribute__ ((interrupt(PORT1_VECTOR))) Port_1 (void)
-#else
-#error Compiler not supported!
-#endif
-{
-    P1IES ^= BIT3;
+ISR_Vector(PORT1_VECTOR)
+ISR_Define(Port_1(void)) {
+    Switch_edgeflip();
 
     // Debounce~
     // disable further interrupt from P1.3
-    P1IE  &= ~BIT3;
-    P1IFG  =  0;
+    Switch_disable();
 
-    P1OUT ^= BIT6;
+    GreenLED_flip();
     current_position ^= 180;
-    TA0CCR1 = duty_cycle_at[current_position];
+    PWM1_set_duty_cycle(PWM1_duty_cycle_at[current_position]);
 
     // Enable Watchdog
     // Select SMCLK as source
-    WDTCTL = WDT_MDLY_32;
-    IFG1 &= ~WDTIFG;
-    IE1  |=  WDTIE;
+    Watchdog_enable(WDT_MDLY_32);
 }
 
-#if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
-#pragma vector=WDT_VECTOR
-__interrupt void watchdog_timer (void)
-#elif defined(__GNUC__)
-void __attribute__ ((interrupt(WDT_VECTOR))) watchdog_timer (void)
-#else
-#error Compiler not supported!
-#endif
-{
-    // Re-enable button push sensing
-    P1IE  |=  BIT3;
-    P1IFG  =  0;
+ISR_Vector(WDT_VECTOR)
+ISR_Define(watchdog_timer(void)) {
+    Switch_enable();
 
     // Stop watchdog
-    WDTCTL = WDTPW | WDTHOLD;
-    IE1   &= ~WDTIE;
+    Watchdog_disable();
 }
